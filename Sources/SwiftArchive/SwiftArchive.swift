@@ -15,60 +15,97 @@ import Foundation
 /// ## Reading Archives
 ///
 /// ```swift
-/// let reader = try ArchiveReader(url: fileURL)
-/// let entries = try reader.listEntries()
+/// // List entries
+/// let entries = try Archive.list(url: archiveURL)
 /// for entry in entries {
-///     print(entry.path)
+///     print("\(entry.path) - \(entry.size) bytes")
 /// }
 ///
-/// try reader.extractAll(to: destinationURL)
+/// // Extract all
+/// try Archive.extract(url: archiveURL, to: destinationURL)
 ///
-/// if let data = try reader.extract(path: "README.md") {
+/// // Extract single file
+/// if let data = try Archive.extractFile(from: archiveURL, path: "README.md") {
 ///     print(String(data: data, encoding: .utf8)!)
 /// }
+///
+/// // Get archive info
+/// let info = try Archive.info(url: archiveURL)
+/// print("Format: \(info.format), Entries: \(info.entryCount)")
 /// ```
 ///
 /// ## Writing Archives
 ///
 /// ```swift
-/// let writer = ArchiveWriter(url: archiveURL, format: .zip)
-/// try writer.write { context in
-///     try context.addFile(path: "hello.txt", data: helloData)
-///     try context.addDirectory(at: sourceDir)
+/// // Create from directory
+/// try Archive.create(from: sourceDir, to: archiveURL)
+///
+/// // Create from files
+/// try Archive.create(files: [file1, file2], to: archiveURL)
+///
+/// // With progress and cancellation
+/// try Archive.create(files: files, to: archiveURL) { file, progress in
+///     try Task.checkCancellation()
+///     print("\(file.lastPathComponent): \(Int(progress * 100))%")
+/// }
+///
+/// // Different formats
+/// try Archive.create(from: sourceDir, to: tarURL, format: .tar, compression: .gzip)
+/// ```
+///
+/// ## Format Detection
+///
+/// ```swift
+/// let (format, compression) = try Archive.detectFormat(url: archiveURL)
+/// print("Format: \(format), Compression: \(compression)")
+///
+/// if Archive.isArchive(url: someURL) {
+///     // Handle archive
 /// }
 /// ```
 ///
-/// ## Quick Operations
-///
-/// ```swift
-/// // Info
-/// let info = try Archive.info(url: fileURL)
-///
-/// // Extract
-/// try Archive.extract(url: archiveURL, to: destinationURL)
-///
-/// // Create
-/// try Archive.create(from: sourceDir, to: archiveURL)
-/// ```
-///
-public enum Archive {
+public protocol ArchiveProviding: Sendable {
+    func info(url: URL, password: String?) throws -> ArchiveInfo
+    func list(url: URL, password: String?) throws -> [ArchiveEntry]
+    func extract(url: URL, to destination: URL, password: String?, overwrite: Bool, progress: ((Double) -> Void)?) throws
+    func extractFile(from url: URL, path: String, password: String?) throws -> Data?
+    func create(
+        from directoryURL: URL,
+        to archiveURL: URL,
+        format: ArchiveFormat,
+        compression: ArchiveCompression?,
+        progress: ((URL, Double) throws -> Void)?
+    ) throws
+    func create(
+        files: [URL],
+        to archiveURL: URL,
+        format: ArchiveFormat,
+        compression: ArchiveCompression?,
+        progress: (
+            (URL, Double) throws -> Void)?
+    ) throws
+    func detectFormat(url: URL) throws -> (ArchiveFormat, ArchiveCompression)
+    func isArchive(url: URL) -> Bool
+}
+
+
+// MARK: - Default Implementation
+
+public struct ArchiveProvider: ArchiveProviding {
     
-    // MARK: - Reading
+    public init() {}
     
-    /// Get archive information without fully reading the archive
-    public static func info(url: URL, password: String? = nil) throws -> ArchiveInfo {
+    public func info(url: URL, password: String? = nil) throws -> ArchiveInfo {
         let reader = try ArchiveReader(url: url, password: password)
         return try reader.info()
     }
     
-    /// List all entries in an archive
-    public static func list(url: URL, password: String? = nil) throws -> [ArchiveEntry] {
+    public func list(url: URL, password: String? = nil) throws -> [ArchiveEntry] {
         let reader = try ArchiveReader(url: url, password: password)
         return try reader.listEntries()
     }
     
-    /// Extract all entries from an archive
-    public static func extract(
+    public func extract(
         url: URL,
         to destination: URL,
         password: String? = nil,
@@ -76,68 +113,125 @@ public enum Archive {
         progress: ((Double) -> Void)? = nil
     ) throws {
         let reader = try ArchiveReader(url: url, password: password)
-        try reader.extractAll(
-            to: destination,
-            overwrite: overwrite,
-            progress: progress
-        )
+        try reader.extractAll(to: destination, overwrite: overwrite, progress: progress)
     }
     
-    /// Extract a single file from an archive
-    public static func extractFile(
-        from url: URL,
-        path entryPath: String,
-        password: String? = nil
-    ) throws -> Data? {
+    public func extractFile(from url: URL, path: String, password: String? = nil) throws -> Data? {
         let reader = try ArchiveReader(url: url, password: password)
-        return try reader.extract(path: entryPath)
+        return try reader.extract(path: path)
+    }
+    
+    public func create(
+        from directoryURL: URL,
+        to archiveURL: URL,
+        format: ArchiveFormat = .zip,
+        compression: ArchiveCompression? = nil,
+        progress: ((URL, Double) throws -> Void)? = nil
+    ) throws {
+        let writer = ArchiveWriter(url: archiveURL, format: format, compression: compression)
+        try writer.addDirectory(at: directoryURL, progress: progress)
+    }
+
+    public func create(
+        files: [URL],
+        to archiveURL: URL,
+        format: ArchiveFormat = .zip,
+        compression: ArchiveCompression? = nil,
+        progress: ((URL, Double) throws -> Void)? = nil
+    ) throws {
+        let writer = ArchiveWriter(url: archiveURL, format: format, compression: compression)
+        
+        let totalSize = files.reduce(into: Int64(0)) { result, url in
+            result += (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+        }
+        
+        var processedSize: Int64 = 0
+        
+        try writer.write { context in
+            for file in files {
+                try context.addFile(at: file)
+                
+                let fileSize = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int64) ?? 0
+                processedSize += fileSize
+                
+                try progress?(file, Double(processedSize) / Double(max(totalSize, 1)))
+            }
+        }
+        
+        try progress?(archiveURL, 1.0)
+    }
+    
+    public func detectFormat(url: URL) throws -> (ArchiveFormat, ArchiveCompression) {
+        let info = try info(url: url)
+        return (info.format, info.compression)
+    }
+    
+    public func isArchive(url: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: url.path) else { return false }
+        return (try? info(url: url)) != nil
+    }
+}
+
+// MARK: - Static Convenience API
+
+public enum Archive {
+    
+    public static let shared: ArchiveProviding = ArchiveProvider()
+    
+    // MARK: - Reading
+    
+    public static func info(url: URL, password: String? = nil) throws -> ArchiveInfo {
+        try shared.info(url: url, password: password)
+    }
+    
+    public static func list(url: URL, password: String? = nil) throws -> [ArchiveEntry] {
+        try shared.list(url: url, password: password)
+    }
+    
+    public static func extract(
+        url: URL,
+        to destination: URL,
+        password: String? = nil,
+        overwrite: Bool = false,
+        progress: ((Double) -> Void)? = nil
+    ) throws {
+        try shared.extract(url: url, to: destination, password: password, overwrite: overwrite, progress: progress)
+    }
+    
+    public static func extractFile(from url: URL, path: String, password: String? = nil) throws -> Data? {
+        try shared.extractFile(from: url, path: path, password: password)
     }
     
     // MARK: - Writing
     
-    /// Create an archive from a directory
     public static func create(
         from directoryURL: URL,
         to archiveURL: URL,
         format: ArchiveFormat = .zip,
         compression: ArchiveCompression? = nil,
-        progress: ((Double) -> Void)? = nil
+        progress: ((URL, Double) throws -> Void)? = nil
     ) throws {
-        let writer = ArchiveWriter(url: archiveURL, format: format, compression: compression)
-        try writer.addDirectory(at: directoryURL, progress: progress)
+        try shared.create(from: directoryURL, to: archiveURL, format: format, compression: compression, progress: progress)
     }
     
-    /// Create an archive from multiple files
     public static func create(
         files: [URL],
         to archiveURL: URL,
         format: ArchiveFormat = .zip,
         compression: ArchiveCompression? = nil,
-        progress: ((Double) -> Void)? = nil
+        progress: ((URL, Double) throws -> Void)? = nil
     ) throws {
-        let writer = ArchiveWriter(url: archiveURL, format: format, compression: compression)
-        try writer.addFiles(files, progress: progress)
+        try shared.create(files: files, to: archiveURL, format: format, compression: compression, progress: progress)
     }
     
     // MARK: - Format Detection
     
-    /// Detect the format of an archive
     public static func detectFormat(url: URL) throws -> (ArchiveFormat, ArchiveCompression) {
-        let info = try info(url: url)
-        return (info.format, info.compression)
+        try shared.detectFormat(url: url)
     }
     
-    /// Check if a file is a supported archive
     public static func isArchive(url: URL) -> Bool {
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            return false
-        }
-        do {
-            _ = try info(url: url)
-            return true
-        } catch {
-            return false
-        }
+        shared.isArchive(url: url)
     }
 }
 
@@ -148,86 +242,5 @@ extension ArchiveReader {
     /// Convenience alias for creating a reader
     public static func open(url: URL, password: String? = nil) throws -> ArchiveReader {
         try ArchiveReader(url: url, password: password)
-    }
-}
-
-// MARK: - ArchiveWriter Convenience
-
-extension ArchiveWriter {
-    
-    /// Create an archive from a directory
-    public static func archive(
-        directory directoryURL: URL,
-        to archiveURL: URL,
-        format: ArchiveFormat = .zip,
-        compression: ArchiveCompression? = nil,
-        progress: ((Double) -> Void)? = nil
-    ) throws {
-        let writer = ArchiveWriter(url: archiveURL, format: format, compression: compression)
-        try writer.addDirectory(at: directoryURL, progress: progress)
-    }
-    
-    /// Create an archive from multiple files
-    public static func archive(
-        files: [URL],
-        to archiveURL: URL,
-        format: ArchiveFormat = .zip,
-        compression: ArchiveCompression? = nil,
-        progress: ((Double) -> Void)? = nil
-    ) throws {
-        let writer = ArchiveWriter(url: archiveURL, format: format, compression: compression)
-        try writer.addFiles(files, progress: progress)
-    }
-}
-
-// MARK: - URL Extension
-
-extension URL {
-    
-    /// Check if this URL points to a supported archive
-    public var isArchive: Bool {
-        Archive.isArchive(url: self)
-    }
-    
-    /// Get archive info
-    public func archiveInfo(password: String? = nil) throws -> ArchiveInfo {
-        try Archive.info(url: self, password: password)
-    }
-    
-    /// List entries in the archive
-    public func archiveEntries(password: String? = nil) throws -> [ArchiveEntry] {
-        try Archive.list(url: self, password: password)
-    }
-    
-    /// Extract the archive
-    public func extractArchive(
-        to destination: URL,
-        password: String? = nil,
-        overwrite: Bool = false,
-        progress: ((Double) -> Void)? = nil
-    ) throws {
-        try Archive.extract(
-            url: self,
-            to: destination,
-            password: password,
-            overwrite: overwrite,
-            progress: progress
-        )
-    }
-    
-    /// Create an archive from this directory
-    public func createArchive(
-        at archiveURL: URL,
-        format: ArchiveFormat = .zip,
-        compression: ArchiveCompression? = nil,
-        progress: ((Double) -> Void)? = nil
-    ) throws {
-        try Archive.create(
-            from: self,
-            to: archiveURL,
-            format: format,
-            compression: compression,
-            progress: progress
-        )
     }
 }

@@ -76,7 +76,7 @@ final class ArchiveWriter: Sendable {
     func addDirectory(
         at directoryURL: URL,
         basePath: String? = nil,
-        progress: ((Double) -> Void)? = nil
+        progress: ((URL, Double) throws -> Void)? = nil
     ) throws {
         try write { context in
             try context.addDirectory(at: directoryURL, basePath: basePath, progress: progress)
@@ -163,7 +163,7 @@ final class WriteContext {
     func addDirectory(
         at directoryURL: URL,
         basePath: String? = nil,
-        progress: ((Double) -> Void)? = nil
+        progress: ((URL, Double) throws -> Void)? = nil
     ) throws {
         let fileManager = FileManager.default
         let base = basePath ?? directoryURL.lastPathComponent
@@ -199,7 +199,7 @@ final class WriteContext {
                 try addFile(at: item.url, archivePath: archivePath)
             }
             
-            progress?(Double(index + 1) / totalCount)
+            try progress?(item.url, Double(index + 1) / totalCount)
         }
     }
 }

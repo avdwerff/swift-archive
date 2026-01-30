@@ -229,7 +229,7 @@ struct SwiftArchiveTests {
         let archiveURL = tempDir.appendingPathComponent("test.zip")
         
         var progressValues: [Double] = []
-        try Archive.create(from: sourceDir, to: archiveURL) { progress in
+        try Archive.create(from: sourceDir, to: archiveURL) { _, progress  in
             progressValues.append(progress)
         }
         
@@ -270,56 +270,6 @@ struct SwiftArchiveTests {
         #expect(Archive.isArchive(url: nonexistentURL) == false)
     }
     
-    // MARK: - URL Extension Tests
-    
-    @Test func urlIsArchive() throws {
-        let zipURL = fixtureURL("test.zip")
-        
-        #expect(zipURL.isArchive == true)
-    }
-    
-    @Test func urlArchiveInfo() throws {
-        let zipURL = fixtureURL("test.zip")
-        let info = try zipURL.archiveInfo()
-        
-        #expect(info.format == .zip)
-    }
-    
-    @Test func urlArchiveEntries() throws {
-        let zipURL = fixtureURL("test.zip")
-        let entries = try zipURL.archiveEntries()
-        
-        #expect(!entries.isEmpty)
-    }
-    
-    @Test func urlExtractArchive() throws {
-        let tempDir = try createTempDirectory()
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-        
-        let zipURL = fixtureURL("test.zip")
-        let outputDir = tempDir.appendingPathComponent("output")
-        
-        try zipURL.extractArchive(to: outputDir)
-        
-        let contents = try FileManager.default.contentsOfDirectory(atPath: outputDir.path)
-        #expect(!contents.isEmpty)
-    }
-    
-    @Test func urlCreateArchive() throws {
-        let tempDir = try createTempDirectory()
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-        
-        let sourceDir = tempDir.appendingPathComponent("source")
-        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
-        _ = try createTestFiles(in: sourceDir)
-        
-        let archiveURL = tempDir.appendingPathComponent("test.zip")
-        
-        try sourceDir.createArchive(at: archiveURL)
-        
-        #expect(FileManager.default.fileExists(atPath: archiveURL.path))
-    }
-    
     // MARK: - ArchiveReader open Tests
     
     @Test func archiveReaderOpen() throws {
@@ -329,9 +279,9 @@ struct SwiftArchiveTests {
         #expect(reader.url == zipURL)
     }
     
-    // MARK: - ArchiveWriter archive Tests
+    // MARK: - ArchiveWriter Tests
     
-    @Test func archiveWriterArchiveDirectory() throws {
+    @Test func archiveWriterCreateFromDirectory() throws {
         let tempDir = try createTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempDir) }
         
@@ -341,21 +291,29 @@ struct SwiftArchiveTests {
         
         let archiveURL = tempDir.appendingPathComponent("test.zip")
         
-        try ArchiveWriter.archive(directory: sourceDir, to: archiveURL)
+        let writer = ArchiveWriter(url: archiveURL)
+        try writer.addDirectory(at: sourceDir)
         
         #expect(FileManager.default.fileExists(atPath: archiveURL.path))
+        
+        let info = try Archive.info(url: archiveURL)
+        #expect(info.format == .zip)
     }
     
-    @Test func archiveWriterArchiveFiles() throws {
+    @Test func archiveWriterAddFiles() throws {
         let tempDir = try createTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempDir) }
         
         let files = try createTestFiles(in: tempDir)
         let archiveURL = tempDir.appendingPathComponent("test.zip")
         
-        try ArchiveWriter.archive(files: files, to: archiveURL)
+        let writer = ArchiveWriter(url: archiveURL)
+        try writer.addFiles(files)
         
         #expect(FileManager.default.fileExists(atPath: archiveURL.path))
+        
+        let entries = try Archive.list(url: archiveURL)
+        #expect(entries.count == 3)
     }
     
     // MARK: - Round-trip Tests
