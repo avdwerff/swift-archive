@@ -211,15 +211,6 @@ public enum ArchiveFormat: String, CaseIterable, Sendable {
             return false
         }
     }
-    
-    public var isWritable: Bool {
-        switch self {
-        case .rar, .cab:
-            return false
-        default:
-            return true
-        }
-    }
 }
 
 
