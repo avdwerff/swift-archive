@@ -25,6 +25,8 @@ final class ArchiveWriter: Sendable {
     let url: URL
     let format: ArchiveFormat
     let compression: ArchiveCompression
+    let encryption: ArchiveEncryption?
+    let password: String?
     
     // MARK: - Initialization
     
@@ -33,20 +35,32 @@ final class ArchiveWriter: Sendable {
     ///   - url: Destination URL for the archive
     ///   - format: Archive format (default: .zip)
     ///   - compression: Compression method (default: .deflate for zip, .none for others)
+    ///   - encryption: Encryption method (optional)
+    ///   - password: Password for encryption (required if encryption is set)
     init(
         url: URL,
         format: ArchiveFormat = .zip,
-        compression: ArchiveCompression? = nil
+        compression: ArchiveCompression? = nil,
+        encryption: ArchiveEncryption? = nil,
+        password: String? = nil
     ) {
         self.url = url
         self.format = format
         self.compression = compression ?? Self.defaultCompression(for: format)
+        self.encryption = encryption
+        self.password = password
     }
     
     /// Write archive using a builder closure
     /// - Parameter builder: Closure that receives a WriteContext to add entries
     func write(_ builder: (WriteContext) throws -> Void) throws {
-        let handle = try WriteHandle(url: url, format: format, compression: compression)
+        let handle = try WriteHandle(
+            url: url,
+            format: format,
+            compression: compression,
+            encryption: encryption,
+            password: password
+        )
         let context = WriteContext(handle: handle)
         
         do {
@@ -104,7 +118,6 @@ final class ArchiveWriter: Sendable {
             return .none
         }
     }
-    
 }
 
 // MARK: - Write Context
@@ -210,7 +223,13 @@ private final class WriteHandle {
     
     private var archive: OpaquePointer?
     
-    init(url: URL, format: ArchiveFormat, compression: ArchiveCompression) throws {
+    init(
+        url: URL,
+        format: ArchiveFormat,
+        compression: ArchiveCompression,
+        encryption: ArchiveEncryption?,
+        password: String?
+    ) throws {
         archive = archive_write_new()
         guard let archive else {
             throw ArchiveError.libarchiveError(code: -1, message: "Failed to create archive writer")
@@ -232,6 +251,11 @@ private final class WriteHandle {
             archive_write_free(archive)
             self.archive = nil
             throw error
+        }
+        
+        // Set encryption (if provided)
+        if let encryption, let password {
+            try setEncryption(archive, encryption: encryption, password: password, format: format)
         }
         
         // Open file
@@ -359,6 +383,8 @@ private final class WriteHandle {
         }
     }
     
+    // MARK: - Private Configuration
+    
     private func setFormat(_ archive: OpaquePointer, format: ArchiveFormat) -> Int32 {
         switch format {
         case .zip:
@@ -377,18 +403,44 @@ private final class WriteHandle {
             return archive_write_set_format_ar_svr4(archive)
         case .mtree:
             return archive_write_set_format_mtree(archive)
-        case .raw:
-            return archive_write_set_format_raw(archive)
-        case .rar, .cab, .unknown:
+        case .warc:
+            return archive_write_set_format_warc(archive)
+        case .shar:
+            return archive_write_set_format_shar(archive)
+        case .rar, .lha, .cab, .unknown:
+            // Fallback to zip for unsupported write formats
             return archive_write_set_format_zip(archive)
         }
     }
     
     private func setCompression(_ archive: OpaquePointer, compression: ArchiveCompression, format: ArchiveFormat) -> Int32 {
+        // ZIP handles compression internally via options
         if format == .zip {
-            return archive_write_set_options(archive, "zip:compression=deflate")
+            let option: String
+            switch compression {
+            case .none:
+                option = "zip:compression=store"
+            case .bzip2:
+                option = "zip:compression=bzip2"
+            case .lzma:
+                option = "zip:compression=lzma"
+            case .xz:
+                option = "zip:compression=xz"
+            case .zstd:
+                option = "zip:compression=zstd"
+            default:
+                option = "zip:compression=deflate"
+            }
+            return archive_write_set_options(archive, option)
         }
         
+        // 7z handles compression internally
+        if format == .sevenZip {
+            // 7z uses LZMA by default, options can be set if needed
+            return ARCHIVE_OK
+        }
+        
+        // Other formats use filters
         switch compression {
         case .none:
             return archive_write_add_filter_none(archive)
@@ -406,8 +458,52 @@ private final class WriteHandle {
             return archive_write_add_filter_lz4(archive)
         case .lzip:
             return archive_write_add_filter_lzip(archive)
+        case .lzop:
+            return archive_write_add_filter_lzop(archive)
         case .compress:
             return archive_write_add_filter_compress(archive)
+        // Unavailable compressions - should never reach here due to validation
+        default:
+            return archive_write_add_filter_none(archive)
+        }
+    }
+    
+    private func setEncryption(_ archive: OpaquePointer, encryption: ArchiveEncryption, password: String, format: ArchiveFormat) throws {
+        // Set passphrase
+        let passphraseResult = password.withCString { pwd in
+            archive_write_set_passphrase(archive, pwd)
+        }
+        
+        guard passphraseResult == ARCHIVE_OK else {
+            throw ArchiveError.from(archive: archive)
+        }
+        
+        // Set encryption option based on format
+        let option: String
+        switch format {
+        case .zip:
+            switch encryption {
+            case .zipTraditional:
+                option = "zip:encryption=zipcrypt"
+            case .aes128:
+                option = "zip:encryption=aes128"
+            case .aes192:
+                option = "zip:encryption=aes192"
+            case .aes256:
+                option = "zip:encryption=aes256"
+            }
+        case .sevenZip:
+            // 7z only supports AES-256
+            option = "7zip:compression=lzma2"  // encryption is automatic when passphrase is set
+            // Note: 7z encryption is enabled automatically when passphrase is set
+            return
+        default:
+            throw ArchiveError.encryptionNotSupported(format)
+        }
+        
+        let optionResult = archive_write_set_options(archive, option)
+        guard optionResult == ARCHIVE_OK else {
+            throw ArchiveError.from(archive: archive)
         }
     }
 }

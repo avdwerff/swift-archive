@@ -77,9 +77,37 @@
 #define HAVE_SIZE_T 1
 #define HAVE_SSIZE_T 1
 
-/* zlib */
+/* ================================================== */
+/* COMPRESSION LIBRARIES                              */
+/* ================================================== */
+
+/* zlib - always available on Apple platforms */
 #define HAVE_ZLIB_H 1
 #define HAVE_LIBZ 1
+
+/* bzip2 - available on macOS, not iOS */
+#if TARGET_OS_OSX
+#define HAVE_BZLIB_H 1
+#define HAVE_LIBBZ2 1
+#endif
+
+/* lzma/xz - available via Compression framework or liblzma */
+//#define HAVE_LZMA_H 1
+//#define HAVE_LIBLZMA 1
+
+/* zstd */
+//#define HAVE_ZSTD_H 1
+//#define HAVE_LIBZSTD 1
+//#define HAVE_ZSTD_compressStream 1
+
+/* lz4 */
+//#define HAVE_LZ4_H 1
+//#define HAVE_LIBLZ4 1
+//#define HAVE_LZ4HC_H 1
+
+/* ================================================== */
+/* ENCRYPTION - CommonCrypto (AES)                    */
+/* ================================================== */
 
 /* CommonCrypto for hashing */
 #define HAVE_COMMONCRYPTO_COMMONDIGEST_H 1
@@ -89,7 +117,16 @@
 #define ARCHIVE_CRYPTO_SHA384_COMMONCRYPTO 1
 #define ARCHIVE_CRYPTO_SHA512_COMMONCRYPTO 1
 
-/* File/directory functions */
+/* CommonCrypto for AES encryption (ZIP, 7z) */
+#define HAVE_COMMONCRYPTO_COMMONCRYPTOR_H 1
+#define HAVE_CCRYPTORCREATEWITHMODE 1
+#define HAVE_CCCRYPTORRELEASE 1
+#define HAVE_PBKDF2_SHA1 1
+
+/* ================================================== */
+/* FILE/DIRECTORY FUNCTIONS                           */
+/* ================================================== */
+
 #define HAVE_CHOWN 1
 #define HAVE_FCHDIR 1
 #define HAVE_FCHMOD 1

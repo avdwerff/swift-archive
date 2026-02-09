@@ -176,4 +176,91 @@ struct ArchiveWriterTests {
         #expect(info.format == .tar)
         #expect(info.compression == .gzip)
     }
+    
+    // MARK: - Encryption Tests
+
+    @Test func createEncryptedZipArchive() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let archiveURL = tempDir.appendingPathComponent("encrypted.zip")
+        let writer = ArchiveWriter(
+            url: archiveURL,
+            format: .zip,
+            encryption: .aes256,
+            password: "secret123"
+        )
+        
+        try writer.write { context in
+            try context.addFile(path: "secret.txt", data: "Top secret content".data(using: .utf8)!)
+        }
+        
+        #expect(FileManager.default.fileExists(atPath: archiveURL.path))
+        
+        // List entries works without password (headers are not encrypted)
+        let readerNoPassword = try ArchiveReader(url: archiveURL)
+        let entries = try readerNoPassword.listEntries()
+        #expect(entries.count == 1)
+        #expect(entries.first?.isEncrypted == true)  // Entry should report as encrypted
+        
+        // Extract FAILS with wrong password
+        let readerWrongPassword = try ArchiveReader(url: archiveURL, password: "wrongpassword")
+        #expect(throws: ArchiveError.self) {
+            _ = try readerWrongPassword.extract(path: "secret.txt")
+        }
+        
+        // Extract SUCCEEDS with correct password
+        let readerCorrectPassword = try ArchiveReader(url: archiveURL, password: "secret123")
+        let data = try readerCorrectPassword.extract(path: "secret.txt")
+        #expect(String(data: data!, encoding: .utf8) == "Top secret content")
+    }
+    
+    @Test func readEncryptedArchiveWithWrongPassword() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let archiveURL = tempDir.appendingPathComponent("encrypted.zip")
+        
+        // Create encrypted archive
+        let writer = ArchiveWriter(
+            url: archiveURL,
+            format: .zip,
+            encryption: .aes256,
+            password: "correctpassword"
+        )
+        
+        try writer.write { context in
+            try context.addFile(path: "secret.txt", data: "Secret".data(using: .utf8)!)
+        }
+        
+        // Try to read with wrong password
+        let reader = try ArchiveReader(url: archiveURL, password: "wrongpassword")
+        
+        #expect(throws: ArchiveError.self) {
+            _ = try reader.extract(path: "secret.txt")
+        }
+    }
+    
+    // MARK: - Different Encryption Methods
+    
+    @Test func createZipWithAES128() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let archiveURL = tempDir.appendingPathComponent("aes128.zip")
+        let writer = ArchiveWriter(
+            url: archiveURL,
+            format: .zip,
+            encryption: .aes128,
+            password: "secret"
+        )
+        
+        try writer.write { context in
+            try context.addFile(path: "test.txt", data: "Hello".data(using: .utf8)!)
+        }
+        
+        let reader = try ArchiveReader(url: archiveURL, password: "secret")
+        let data = try reader.extract(path: "test.txt")
+        #expect(String(data: data!, encoding: .utf8) == "Hello")
+    }
 }

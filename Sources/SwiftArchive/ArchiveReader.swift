@@ -26,6 +26,16 @@ final class ArchiveReader: Sendable {
         self.password = password
     }
     
+    var isEncrypted: Bool {
+        let handle = try? ArchiveHandle(url: url, password: nil)
+        defer { handle?.close() }
+        
+        if let entry = try? handle?.nextEntry() {
+            return entry.isEncrypted
+        }
+        return false
+    }
+    
     /// Get archive info
     func info() throws -> ArchiveInfo {
         let handle = try ArchiveHandle(url: url, password: password)
@@ -262,9 +272,9 @@ private final class ArchiveHandle {
     
     private func detectFormat() {
         guard let archive = archive else { return }
-        format = ArchiveFormat(rawCode: archive_format(archive))
+        format = ArchiveFormat(code: archive_format(archive))
         if archive_filter_count(archive) > 0 {
-            compression = ArchiveCompression(rawCode: archive_filter_code(archive, 0))
+            compression = ArchiveCompression(code: archive_filter_code(archive, 0))
         }
     }
 }

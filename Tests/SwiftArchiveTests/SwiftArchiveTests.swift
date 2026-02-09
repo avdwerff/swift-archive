@@ -476,4 +476,75 @@ struct SwiftArchiveTests {
             #expect(data.count == 100 * 1024)
         }
     }
+    
+    // MARK: - Encryption Tests
+    
+    @Test func archiveCreateEncrypted() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let files = try createTestFiles(in: tempDir)
+        let archiveURL = tempDir.appendingPathComponent("encrypted.zip")
+        
+        try Archive.create(
+            files: files,
+            to: archiveURL,
+            encryption: .aes256,
+            password: "secret123"
+        )
+        
+        #expect(FileManager.default.fileExists(atPath: archiveURL.path))
+        
+        // Entries visible without password (ZIP behavior)
+        let entries = try Archive.list(url: archiveURL)
+        #expect(entries.count == 3)
+        #expect(entries.first?.isEncrypted == true)
+    }
+    
+    @Test func archiveExtractEncryptedWithPassword() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let files = try createTestFiles(in: tempDir)
+        let archiveURL = tempDir.appendingPathComponent("encrypted.zip")
+        let extractDir = tempDir.appendingPathComponent("extracted")
+        
+        try Archive.create(files: files, to: archiveURL, encryption: .aes256, password: "password")
+        try Archive.extract(url: archiveURL, to: extractDir, password: "password")
+        
+        let content = try String(contentsOf: extractDir.appendingPathComponent("file1.txt"), encoding: .utf8)
+        #expect(content == "Hello, World!")
+    }
+    
+    @Test func archiveExtractEncryptedWrongPassword() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let files = try createTestFiles(in: tempDir)
+        let archiveURL = tempDir.appendingPathComponent("encrypted.zip")
+        let extractDir = tempDir.appendingPathComponent("extracted")
+        
+        try Archive.create(files: files, to: archiveURL, encryption: .aes256, password: "correct")
+        
+        #expect(throws: ArchiveError.self) {
+            try Archive.extract(url: archiveURL, to: extractDir, password: "wrong")
+        }
+    }
+    
+    @Test func archiveExtractFileEncrypted() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let files = try createTestFiles(in: tempDir)
+        let archiveURL = tempDir.appendingPathComponent("encrypted.zip")
+        let password = "secret123"
+        
+        try Archive.create(files: files, to: archiveURL, encryption: .aes256, password: password)
+        
+        // Extract single file with password
+        let data = try Archive.extractFile(from: archiveURL, path: "file1.txt", password: password)
+        let content = String(data: data!, encoding: .utf8)
+        
+        #expect(content == "Hello, World!")
+    }
 }

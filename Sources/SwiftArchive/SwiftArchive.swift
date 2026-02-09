@@ -74,6 +74,8 @@ public protocol ArchiveProviding: Sendable {
         to archiveURL: URL,
         format: ArchiveFormat,
         compression: ArchiveCompression?,
+        encryption: ArchiveEncryption?,
+        password: String?,
         progress: ((URL, Double) throws -> Void)?
     ) throws
     func create(
@@ -81,13 +83,44 @@ public protocol ArchiveProviding: Sendable {
         to archiveURL: URL,
         format: ArchiveFormat,
         compression: ArchiveCompression?,
-        progress: (
-            (URL, Double) throws -> Void)?
+        encryption: ArchiveEncryption?,
+        password: String?,
+        progress: ((URL, Double) throws -> Void)?
+    ) throws
+    func createEncrypted(
+        files: [URL],
+        to archiveURL: URL,
+        password: String,
+        format: ArchiveFormat,
+        progress: ((URL, Double) throws -> Void)?
+    ) throws
+    func createEncrypted(
+        from directoryURL: URL,
+        to archiveURL: URL,
+        password: String,
+        format: ArchiveFormat,
+        progress: ((URL, Double) throws -> Void)?
     ) throws
     func detectFormat(url: URL) throws -> (ArchiveFormat, ArchiveCompression)
     func isArchive(url: URL) -> Bool
 }
 
+extension ArchiveProviding {
+    func create(
+        from directoryURL: URL,
+        to archiveURL: URL,
+    ) throws {
+        try create(
+            from: directoryURL,
+            to: archiveURL,
+            format: .zip,
+            compression: nil,
+            encryption: nil,
+            password: nil,
+            progress: nil
+        )
+    }
+}
 
 // MARK: - Default Implementation
 
@@ -126,20 +159,44 @@ public struct ArchiveProvider: ArchiveProviding {
         to archiveURL: URL,
         format: ArchiveFormat = .zip,
         compression: ArchiveCompression? = nil,
+        encryption: ArchiveEncryption? = nil,
+        password: String? = nil,
         progress: ((URL, Double) throws -> Void)? = nil
     ) throws {
+        try validateOptions(
+            format: format,
+            compression: compression,
+            encryption: encryption,
+            password: password
+        )
         let writer = ArchiveWriter(url: archiveURL, format: format, compression: compression)
         try writer.addDirectory(at: directoryURL, progress: progress)
     }
-
+    
     public func create(
         files: [URL],
         to archiveURL: URL,
         format: ArchiveFormat = .zip,
         compression: ArchiveCompression? = nil,
+        encryption: ArchiveEncryption? = nil,
+        password: String? = nil,
         progress: ((URL, Double) throws -> Void)? = nil
     ) throws {
-        let writer = ArchiveWriter(url: archiveURL, format: format, compression: compression)
+        
+        try validateOptions(
+            format: format,
+            compression: compression,
+            encryption: encryption,
+            password: password
+        )
+        
+        let writer = ArchiveWriter(
+            url: archiveURL,
+            format: format,
+            compression: compression,
+            encryption: encryption,
+            password: password
+        )
         
         let totalSize = files.reduce(into: Int64(0)) { result, url in
             result += (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
@@ -161,6 +218,48 @@ public struct ArchiveProvider: ArchiveProviding {
         try progress?(archiveURL, 1.0)
     }
     
+    public func createEncrypted(
+        files: [URL],
+        to archiveURL: URL,
+        password: String,
+        format: ArchiveFormat = .zip,
+        progress: ((URL, Double) throws -> Void)? = nil
+    ) throws {
+        guard let encryption = format.recommendedEncryption else {
+            throw ArchiveError.encryptionNotSupported(format)
+        }
+        
+        try create(
+            files: files,
+            to: archiveURL,
+            format: format,
+            encryption: encryption,
+            password: password,
+            progress: progress
+        )
+    }
+    
+    public func createEncrypted(
+        from directoryURL: URL,
+        to archiveURL: URL,
+        password: String,
+        format: ArchiveFormat = .zip,
+        progress: ((URL, Double) throws -> Void)? = nil
+    ) throws {
+        guard let encryption = format.recommendedEncryption else {
+            throw ArchiveError.encryptionNotSupported(format)
+        }
+        
+        try create(
+            from: directoryURL,
+            to: archiveURL,
+            format: format,
+            encryption: encryption,
+            password: password,
+            progress: progress
+        )
+    }
+    
     public func detectFormat(url: URL) throws -> (ArchiveFormat, ArchiveCompression) {
         let info = try info(url: url)
         return (info.format, info.compression)
@@ -169,6 +268,52 @@ public struct ArchiveProvider: ArchiveProviding {
     public func isArchive(url: URL) -> Bool {
         guard FileManager.default.fileExists(atPath: url.path) else { return false }
         return (try? info(url: url)) != nil
+    }
+    
+    // MARK: - Validation
+    
+    private func validateOptions(
+        format: ArchiveFormat,
+        compression: ArchiveCompression?,
+        encryption: ArchiveEncryption?,
+        password: String?
+    ) throws {
+
+        if let compression, !compression.isAvailable {
+            throw ArchiveError.compressionNotAvailable(compression)
+        }
+        
+        if let encryption {
+            guard format.writableEncryption.contains(encryption) else {
+                throw ArchiveError.encryptionNotSupported(format)
+            }
+            guard let password, !password.isEmpty else {
+                throw ArchiveError.passwordRequired
+            }
+        }
+        
+        if let password, !password.isEmpty, encryption == nil {
+            throw ArchiveError.encryptionRequired
+        }
+    }
+    
+    private func validateEncryption(
+        format: ArchiveFormat,
+        encryption: ArchiveEncryption?,
+        password: String?
+    ) throws {
+        if let encryption {
+            guard format.writableEncryption.contains(encryption) else {
+                throw ArchiveError.encryptionNotSupported(format)
+            }
+            guard let password, !password.isEmpty else {
+                throw ArchiveError.passwordRequired
+            }
+        }
+        
+        if let password, !password.isEmpty, encryption == nil {
+            throw ArchiveError.encryptionRequired
+        }
     }
 }
 
@@ -209,9 +354,11 @@ public enum Archive {
         to archiveURL: URL,
         format: ArchiveFormat = .zip,
         compression: ArchiveCompression? = nil,
+        encryption: ArchiveEncryption? = nil,
+        password: String? = nil,
         progress: ((URL, Double) throws -> Void)? = nil
     ) throws {
-        try shared.create(from: directoryURL, to: archiveURL, format: format, compression: compression, progress: progress)
+        try shared.create(from: directoryURL, to: archiveURL, format: format, compression: compression, encryption: encryption, password: password, progress: progress)
     }
     
     public static func create(
@@ -219,9 +366,11 @@ public enum Archive {
         to archiveURL: URL,
         format: ArchiveFormat = .zip,
         compression: ArchiveCompression? = nil,
+        encryption: ArchiveEncryption? = nil,
+        password: String? = nil,
         progress: ((URL, Double) throws -> Void)? = nil
     ) throws {
-        try shared.create(files: files, to: archiveURL, format: format, compression: compression, progress: progress)
+        try shared.create(files: files, to: archiveURL, format: format, compression: compression, encryption: encryption, password: password, progress: progress)
     }
     
     // MARK: - Format Detection

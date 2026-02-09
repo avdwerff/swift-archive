@@ -56,19 +56,33 @@ public enum ArchiveError: Error, Sendable {
     
     /// Operation was cancelled
     case cancelled
+    
+    case encryptionNotSupported(ArchiveFormat)
+    
+    case encryptionRequired
+    
+    case invalidPassword
+    
+    case compressionNotAvailable(ArchiveCompression)
 }
 
 extension ArchiveError: LocalizedError {
     public var errorDescription: String? {
         switch self {
+        case .encryptionNotSupported(let format):
+            return "Encryption is not supported for \(format.displayName)"
+        case .passwordRequired:
+            return "Password is required for encrypted archives"
+        case .encryptionRequired:
+            return "Encryption method must be specified when using a password"
+        case .invalidPassword:
+            return "Invalid password"
         case .fileNotFound(let url):
             return "File not found: \(url.path)"
         case .unsupportedFormat:
             return "Unsupported or unrecognized archive format"
         case .corruptedArchive(let details):
             return "Archive is corrupted: \(details)"
-        case .passwordRequired:
-            return "This archive requires a password"
         case .wrongPassword:
             return "Incorrect password"
         case .extractionFailed(let path, let reason):
@@ -87,6 +101,8 @@ extension ArchiveError: LocalizedError {
             return "Archive is empty"
         case .cancelled:
             return "Operation was cancelled"
+        case .compressionNotAvailable(let compression):
+            return "\(compression.displayName) compression is not available on this platform"
         }
     }
 }
