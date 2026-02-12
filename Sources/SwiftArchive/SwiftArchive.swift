@@ -74,6 +74,7 @@ public protocol ArchiveProviding: Sendable {
         to archiveURL: URL,
         format: ArchiveFormat,
         compression: ArchiveCompression?,
+        compressionLevel: Int?,
         encryption: ArchiveEncryption?,
         password: String?,
         progress: ((URL, Double) throws -> Void)?
@@ -83,6 +84,7 @@ public protocol ArchiveProviding: Sendable {
         to archiveURL: URL,
         format: ArchiveFormat,
         compression: ArchiveCompression?,
+        compressionLevel: Int?,
         encryption: ArchiveEncryption?,
         password: String?,
         progress: ((URL, Double) throws -> Void)?
@@ -115,6 +117,7 @@ extension ArchiveProviding {
             to: archiveURL,
             format: .zip,
             compression: nil,
+            compressionLevel: nil,
             encryption: nil,
             password: nil,
             progress: nil
@@ -159,6 +162,7 @@ public struct ArchiveProvider: ArchiveProviding {
         to archiveURL: URL,
         format: ArchiveFormat = .zip,
         compression: ArchiveCompression? = nil,
+        compressionLevel: Int? = nil,
         encryption: ArchiveEncryption? = nil,
         password: String? = nil,
         progress: ((URL, Double) throws -> Void)? = nil
@@ -166,10 +170,18 @@ public struct ArchiveProvider: ArchiveProviding {
         try validateOptions(
             format: format,
             compression: compression,
+            compressionLevel: compressionLevel,
             encryption: encryption,
             password: password
         )
-        let writer = ArchiveWriter(url: archiveURL, format: format, compression: compression)
+        let writer = ArchiveWriter(
+            url: archiveURL,
+            format: format,
+            compression: compression,
+            compressionLevel: compressionLevel,
+            encryption: encryption,
+            password: password
+        )
         try writer.addDirectory(at: directoryURL, progress: progress)
     }
     
@@ -178,6 +190,7 @@ public struct ArchiveProvider: ArchiveProviding {
         to archiveURL: URL,
         format: ArchiveFormat = .zip,
         compression: ArchiveCompression? = nil,
+        compressionLevel: Int? = nil,
         encryption: ArchiveEncryption? = nil,
         password: String? = nil,
         progress: ((URL, Double) throws -> Void)? = nil
@@ -186,6 +199,7 @@ public struct ArchiveProvider: ArchiveProviding {
         try validateOptions(
             format: format,
             compression: compression,
+            compressionLevel: compressionLevel,
             encryption: encryption,
             password: password
         )
@@ -194,6 +208,7 @@ public struct ArchiveProvider: ArchiveProviding {
             url: archiveURL,
             format: format,
             compression: compression,
+            compressionLevel: compressionLevel,
             encryption: encryption,
             password: password
         )
@@ -275,12 +290,19 @@ public struct ArchiveProvider: ArchiveProviding {
     private func validateOptions(
         format: ArchiveFormat,
         compression: ArchiveCompression?,
+        compressionLevel: Int?,
         encryption: ArchiveEncryption?,
         password: String?
     ) throws {
 
         if let compression, !compression.isAvailable {
             throw ArchiveError.compressionNotAvailable(compression)
+        }
+        
+        if let level = compressionLevel {
+            guard (1...9).contains(level) else {
+                throw ArchiveError.invalidCompressionLevel(level)
+            }
         }
         
         if let encryption {
@@ -354,11 +376,21 @@ public enum Archive {
         to archiveURL: URL,
         format: ArchiveFormat = .zip,
         compression: ArchiveCompression? = nil,
+        compressionLevel: Int? = nil,
         encryption: ArchiveEncryption? = nil,
         password: String? = nil,
         progress: ((URL, Double) throws -> Void)? = nil
     ) throws {
-        try shared.create(from: directoryURL, to: archiveURL, format: format, compression: compression, encryption: encryption, password: password, progress: progress)
+        try shared.create(
+            from: directoryURL,
+            to: archiveURL,
+            format: format,
+            compression: compression,
+            compressionLevel: compressionLevel,
+            encryption: encryption,
+            password: password,
+            progress: progress
+        )
     }
     
     public static func create(
@@ -366,11 +398,21 @@ public enum Archive {
         to archiveURL: URL,
         format: ArchiveFormat = .zip,
         compression: ArchiveCompression? = nil,
+        compressionLevel: Int? = nil,
         encryption: ArchiveEncryption? = nil,
         password: String? = nil,
         progress: ((URL, Double) throws -> Void)? = nil
     ) throws {
-        try shared.create(files: files, to: archiveURL, format: format, compression: compression, encryption: encryption, password: password, progress: progress)
+        try shared.create(
+            files: files,
+            to: archiveURL,
+            format: format,
+            compression: compression,
+            compressionLevel: compressionLevel,
+            encryption: encryption,
+            password: password,
+            progress: progress
+        )
     }
     
     // MARK: - Format Detection

@@ -263,4 +263,223 @@ struct ArchiveWriterTests {
         let data = try reader.extract(path: "test.txt")
         #expect(String(data: data!, encoding: .utf8) == "Hello")
     }
+    
+    // MARK: - Compression Level Tests
+    
+    @Test func initWithCompressionLevel() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let archiveURL = tempDir.appendingPathComponent("test.zip")
+        let writer = ArchiveWriter(
+            url: archiveURL,
+            format: .zip,
+            compression: .deflate,
+            compressionLevel: 9
+        )
+        
+        #expect(writer.compression == .deflate)
+        #expect(writer.compressionLevel == 9)
+    }
+    
+    @Test func compressionLevelFastestZip() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let archiveURL = tempDir.appendingPathComponent("fast.zip")
+        let writer = ArchiveWriter(
+            url: archiveURL,
+            format: .zip,
+            compression: .deflate,
+            compressionLevel: 1
+        )
+        
+        // Create large compressible data
+        let data = String(repeating: "Hello World! ", count: 10000).data(using: .utf8)!
+        
+        try writer.write { context in
+            try context.addFile(path: "test.txt", data: data)
+        }
+        
+        #expect(FileManager.default.fileExists(atPath: archiveURL.path))
+        
+        let info = try Archive.info(url: archiveURL)
+        #expect(info.format == .zip)
+    }
+    
+    @Test func compressionLevelBestZip() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let archiveURL = tempDir.appendingPathComponent("best.zip")
+        let writer = ArchiveWriter(
+            url: archiveURL,
+            format: .zip,
+            compression: .deflate,
+            compressionLevel: 9
+        )
+        
+        let data = String(repeating: "Hello World! ", count: 10000).data(using: .utf8)!
+        
+        try writer.write { context in
+            try context.addFile(path: "test.txt", data: data)
+        }
+        
+        #expect(FileManager.default.fileExists(atPath: archiveURL.path))
+    }
+    
+    @Test func compressionLevelAffectsFileSize() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        // Create large compressible data
+        let data = String(repeating: "ABCDEFGHIJ", count: 50000).data(using: .utf8)!
+        
+        // Fast compression (level 1)
+        let fastURL = tempDir.appendingPathComponent("fast.zip")
+        let fastWriter = ArchiveWriter(
+            url: fastURL,
+            format: .zip,
+            compression: .deflate,
+            compressionLevel: 1
+        )
+        try fastWriter.write { context in
+            try context.addFile(path: "test.txt", data: data)
+        }
+        
+        // Best compression (level 9)
+        let bestURL = tempDir.appendingPathComponent("best.zip")
+        let bestWriter = ArchiveWriter(
+            url: bestURL,
+            format: .zip,
+            compression: .deflate,
+            compressionLevel: 9
+        )
+        try bestWriter.write { context in
+            try context.addFile(path: "test.txt", data: data)
+        }
+        
+        let fastSize = try FileManager.default.attributesOfItem(atPath: fastURL.path)[.size] as! Int64
+        let bestSize = try FileManager.default.attributesOfItem(atPath: bestURL.path)[.size] as! Int64
+        
+        // Best compression should produce smaller or equal file
+        #expect(bestSize <= fastSize)
+    }
+    
+    @Test func compressionLevelTarGz() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let archiveURL = tempDir.appendingPathComponent("test.tar.gz")
+        let writer = ArchiveWriter(
+            url: archiveURL,
+            format: .tar,
+            compression: .gzip,
+            compressionLevel: 6
+        )
+        
+        let data = String(repeating: "Test data ", count: 1000).data(using: .utf8)!
+        
+        try writer.write { context in
+            try context.addFile(path: "test.txt", data: data)
+        }
+        
+        let info = try Archive.info(url: archiveURL)
+        #expect(info.format == .tar)
+        #expect(info.compression == .gzip)
+    }
+    
+    @Test(.enabled(if: ArchiveCompression.bzip2.isAvailable))
+    func compressionLevelBzip2() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let archiveURL = tempDir.appendingPathComponent("test.tar.bz2")
+        let writer = ArchiveWriter(
+            url: archiveURL,
+            format: .tar,
+            compression: .bzip2,
+            compressionLevel: 9
+        )
+        
+        let data = String(repeating: "Bzip2 test ", count: 1000).data(using: .utf8)!
+        
+        try writer.write { context in
+            try context.addFile(path: "test.txt", data: data)
+        }
+        
+        let info = try Archive.info(url: archiveURL)
+        #expect(info.format == .tar)
+        #expect(info.compression == .bzip2)
+    }
+    
+    @Test func compressionLevelSevenZip() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let archiveURL = tempDir.appendingPathComponent("test.7z")
+        let writer = ArchiveWriter(
+            url: archiveURL,
+            format: .sevenZip,
+            compressionLevel: 9
+        )
+        
+        let data = String(repeating: "7zip test ", count: 1000).data(using: .utf8)!
+        
+        try writer.write { context in
+            try context.addFile(path: "test.txt", data: data)
+        }
+        
+        #expect(FileManager.default.fileExists(atPath: archiveURL.path))
+        
+        let info = try Archive.info(url: archiveURL)
+        #expect(info.format == .sevenZip)
+    }
+    
+    @Test func compressionLevelWithEncryption() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let archiveURL = tempDir.appendingPathComponent("encrypted-compressed.zip")
+        let writer = ArchiveWriter(
+            url: archiveURL,
+            format: .zip,
+            compression: .deflate,
+            compressionLevel: 6,
+            encryption: .aes256,
+            password: "secret123"
+        )
+        
+        let data = String(repeating: "Secret data ", count: 1000).data(using: .utf8)!
+        
+        try writer.write { context in
+            try context.addFile(path: "secret.txt", data: data)
+        }
+        
+        // Verify it's readable with password
+        let reader = try ArchiveReader(url: archiveURL, password: "secret123")
+        let extracted = try reader.extract(path: "secret.txt")
+        #expect(extracted == data)
+    }
+    
+    @Test func compressionLevelNilUsesDefault() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let archiveURL = tempDir.appendingPathComponent("default.zip")
+        let writer = ArchiveWriter(
+            url: archiveURL,
+            format: .zip,
+            compression: .deflate,
+            compressionLevel: nil  // No level specified
+        )
+        
+        #expect(writer.compressionLevel == nil)
+        
+        try writer.write { context in
+            try context.addFile(path: "test.txt", data: "Hello".data(using: .utf8)!)
+        }
+        
+        #expect(FileManager.default.fileExists(atPath: archiveURL.path))
+    }
 }

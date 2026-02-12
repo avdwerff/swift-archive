@@ -78,32 +78,6 @@ public enum ArchiveCompression: String, CaseIterable, Sendable {
         }
     }
     
-    public var compressionRatio: Int {
-        switch self {
-        case .none: return 0
-        case .lz4: return 2
-        case .lzop: return 3
-        case .compress: return 3
-        case .deflate, .gzip: return 5
-        case .zstd: return 6
-        case .bzip2: return 7
-        case .lzma, .lzma2, .xz, .lzip: return 9
-        }
-    }
-    
-    public var speed: Int {
-        switch self {
-        case .none: return 10
-        case .lz4: return 9
-        case .lzop: return 8
-        case .zstd: return 7
-        case .deflate, .gzip: return 6
-        case .compress: return 5
-        case .bzip2: return 3
-        case .lzma, .lzma2, .xz, .lzip: return 2
-        }
-    }
-    
     /// Initialize from libarchive filter code
     init(code: Int32) {
         switch code {

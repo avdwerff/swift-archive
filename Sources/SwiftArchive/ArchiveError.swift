@@ -64,6 +64,8 @@ public enum ArchiveError: Error, Sendable {
     case invalidPassword
     
     case compressionNotAvailable(ArchiveCompression)
+    
+    case invalidCompressionLevel(Int)
 }
 
 extension ArchiveError: LocalizedError {
@@ -103,6 +105,8 @@ extension ArchiveError: LocalizedError {
             return "Operation was cancelled"
         case .compressionNotAvailable(let compression):
             return "\(compression.displayName) compression is not available on this platform"
+        case .invalidCompressionLevel(let level):
+            return "Invalid compression level: \(level). Must be between 1 and 9."
         }
     }
 }

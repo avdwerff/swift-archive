@@ -25,6 +25,7 @@ final class ArchiveWriter: Sendable {
     let url: URL
     let format: ArchiveFormat
     let compression: ArchiveCompression
+    let compressionLevel: Int?
     let encryption: ArchiveEncryption?
     let password: String?
     
@@ -41,12 +42,14 @@ final class ArchiveWriter: Sendable {
         url: URL,
         format: ArchiveFormat = .zip,
         compression: ArchiveCompression? = nil,
+        compressionLevel: Int? = nil,
         encryption: ArchiveEncryption? = nil,
         password: String? = nil
     ) {
         self.url = url
         self.format = format
         self.compression = compression ?? Self.defaultCompression(for: format)
+        self.compressionLevel = compressionLevel
         self.encryption = encryption
         self.password = password
     }
@@ -58,6 +61,7 @@ final class ArchiveWriter: Sendable {
             url: url,
             format: format,
             compression: compression,
+            compressionLevel: compressionLevel,
             encryption: encryption,
             password: password
         )
@@ -227,6 +231,7 @@ private final class WriteHandle {
         url: URL,
         format: ArchiveFormat,
         compression: ArchiveCompression,
+        compressionLevel: Int?,
         encryption: ArchiveEncryption?,
         password: String?
     ) throws {
@@ -245,7 +250,12 @@ private final class WriteHandle {
         }
         
         // Set compression
-        let compressionResult = setCompression(archive, compression: compression, format: format)
+        let compressionResult = setCompression(
+            archive,
+            compression: compression,
+            format: format,
+            level: compressionLevel
+        )
         guard compressionResult == ARCHIVE_OK else {
             let error = ArchiveError.from(archive: archive)
             archive_write_free(archive)
@@ -413,59 +423,81 @@ private final class WriteHandle {
         }
     }
     
-    private func setCompression(_ archive: OpaquePointer, compression: ArchiveCompression, format: ArchiveFormat) -> Int32 {
+    private func setCompression(
+        _ archive: OpaquePointer,
+        compression: ArchiveCompression,
+        format: ArchiveFormat,
+        level: Int? = nil
+    ) -> Int32 {
+        let validLevel = level.map { max(1, min(9, $0)) }
+        
         // ZIP handles compression internally via options
         if format == .zip {
-            let option: String
+            var options: [String] = []
+            
             switch compression {
             case .none:
-                option = "zip:compression=store"
+                options.append("zip:compression=store")
             case .bzip2:
-                option = "zip:compression=bzip2"
+                options.append("zip:compression=bzip2")
             case .lzma:
-                option = "zip:compression=lzma"
+                options.append("zip:compression=lzma")
             case .xz:
-                option = "zip:compression=xz"
+                options.append("zip:compression=xz")
             case .zstd:
-                option = "zip:compression=zstd"
+                options.append("zip:compression=zstd")
             default:
-                option = "zip:compression=deflate"
+                options.append("zip:compression=deflate")
             }
-            return archive_write_set_options(archive, option)
+            
+            if let level = validLevel, compression != .none {
+                options.append("zip:compression-level=\(level)")
+            }
+            
+            return archive_write_set_options(archive, options.joined(separator: ","))
         }
         
         // 7z handles compression internally
         if format == .sevenZip {
-            // 7z uses LZMA by default, options can be set if needed
+            if let level = validLevel {
+                return archive_write_set_options(archive, "7zip:compression-level=\(level)")
+            }
             return ARCHIVE_OK
         }
         
         // Other formats use filters
+        var result: Int32
         switch compression {
-        case .none:
-            return archive_write_add_filter_none(archive)
+        case .none, .deflate:
+            result = archive_write_add_filter_none(archive)
         case .gzip:
-            return archive_write_add_filter_gzip(archive)
+            result = archive_write_add_filter_gzip(archive)
         case .bzip2:
-            return archive_write_add_filter_bzip2(archive)
-        case .xz:
-            return archive_write_add_filter_xz(archive)
-        case .lzma:
-            return archive_write_add_filter_lzma(archive)
-        case .zstd:
-            return archive_write_add_filter_zstd(archive)
-        case .lz4:
-            return archive_write_add_filter_lz4(archive)
-        case .lzip:
-            return archive_write_add_filter_lzip(archive)
-        case .lzop:
-            return archive_write_add_filter_lzop(archive)
+            result = archive_write_add_filter_bzip2(archive)
         case .compress:
-            return archive_write_add_filter_compress(archive)
-        // Unavailable compressions - should never reach here due to validation
+            result = archive_write_add_filter_compress(archive)
         default:
-            return archive_write_add_filter_none(archive)
+            result = archive_write_add_filter_none(archive)
         }
+        
+        // Set compression level for filters
+        if let level = validLevel, result == ARCHIVE_OK, compression != .none {
+            let levelOption: String?
+            switch compression {
+            case .gzip:
+                levelOption = "gzip:compression-level=\(level)"
+            case .bzip2:
+                levelOption = "bzip2:compression-level=\(level)"
+            default:
+                levelOption = nil
+            }
+            
+            if let option = levelOption {
+                return archive_write_set_options(archive, option)
+            }
+        }
+        
+        return result
     }
     
     private func setEncryption(_ archive: OpaquePointer, encryption: ArchiveEncryption, password: String, format: ArchiveFormat) throws {

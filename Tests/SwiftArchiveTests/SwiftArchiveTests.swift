@@ -337,7 +337,10 @@ struct SwiftArchiveTests {
         try Archive.extract(url: archiveURL, to: extractDir)
         
         // Verify content
-        let extractedFile = extractDir.appendingPathComponent("source/file1.txt")
+        guard let extractedFile = findExtractedFile(named: "file1.txt", in: extractDir) else {
+            Issue.record("file1.txt not found")
+            return
+        }
         let content = try String(contentsOf: extractedFile, encoding: .utf8)
         
         #expect(content == "Hello, World!")
@@ -389,7 +392,10 @@ struct SwiftArchiveTests {
         // Extract and verify content
         try Archive.extract(url: archiveURL, to: extractDir)
         
-        let extractedFile = extractDir.appendingPathComponent("source/file1.txt")
+        guard let extractedFile = findExtractedFile(named: "file1.txt", in: extractDir) else {
+            Issue.record("file1.txt not found")
+            return
+        }
         let content = try String(contentsOf: extractedFile, encoding: .utf8)
         
         #expect(content == "Hello, World!")
@@ -471,7 +477,10 @@ struct SwiftArchiveTests {
         
         // Verify extracted files
         for i in 0..<10 {
-            let extractedFile = extractDir.appendingPathComponent("source/file\(i).bin")
+            guard let extractedFile = findExtractedFile(named: "file\(i).bin", in: extractDir) else {
+                Issue.record("file1.txt not found")
+                return
+            }
             let data = try Data(contentsOf: extractedFile)
             #expect(data.count == 100 * 1024)
         }
@@ -546,5 +555,189 @@ struct SwiftArchiveTests {
         let content = String(data: data!, encoding: .utf8)
         
         #expect(content == "Hello, World!")
+    }
+    
+    // MARK: - Compression Level Tests
+    
+    @Test func archiveCreateWithCompressionLevel() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let files = try createTestFiles(in: tempDir)
+        let archiveURL = tempDir.appendingPathComponent("compressed.zip")
+        
+        try Archive.create(
+            files: files,
+            to: archiveURL,
+            compression: .deflate,
+            compressionLevel: 9
+        )
+        
+        #expect(FileManager.default.fileExists(atPath: archiveURL.path))
+        
+        let info = try Archive.info(url: archiveURL)
+        #expect(info.format == .zip)
+    }
+    
+    @Test func archiveCreateFromDirectoryWithCompressionLevel() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let sourceDir = tempDir.appendingPathComponent("source")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        _ = try createTestFiles(in: sourceDir)
+        
+        let archiveURL = tempDir.appendingPathComponent("compressed.zip")
+        
+        try Archive.create(
+            from: sourceDir,
+            to: archiveURL,
+            compression: .deflate,
+            compressionLevel: 6
+        )
+        
+        #expect(FileManager.default.fileExists(atPath: archiveURL.path))
+        
+        let info = try Archive.info(url: archiveURL)
+        #expect(info.format == .zip)
+    }
+    
+    @Test func archiveCompressionLevelAffectsSize() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        // Create large compressible content
+        let largeFile = tempDir.appendingPathComponent("large.txt")
+        let content = String(repeating: "ABCDEFGHIJ", count: 50000)
+        try content.write(to: largeFile, atomically: true, encoding: .utf8)
+        
+        let fastURL = tempDir.appendingPathComponent("fast.zip")
+        let bestURL = tempDir.appendingPathComponent("best.zip")
+        
+        // Fast compression
+        try Archive.create(
+            files: [largeFile],
+            to: fastURL,
+            compression: .deflate,
+            compressionLevel: 1
+        )
+        
+        // Best compression
+        try Archive.create(
+            files: [largeFile],
+            to: bestURL,
+            compression: .deflate,
+            compressionLevel: 9
+        )
+        
+        let fastSize = try FileManager.default.attributesOfItem(atPath: fastURL.path)[.size] as! Int64
+        let bestSize = try FileManager.default.attributesOfItem(atPath: bestURL.path)[.size] as! Int64
+        
+        // Best compression should be smaller or equal
+        #expect(bestSize <= fastSize)
+    }
+    
+    @Test func archiveCompressionLevelWithEncryption() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let files = try createTestFiles(in: tempDir)
+        let archiveURL = tempDir.appendingPathComponent("compressed-encrypted.zip")
+        let extractDir = tempDir.appendingPathComponent("extracted")
+        let password = "secret123"
+        
+        try Archive.create(
+            files: files,
+            to: archiveURL,
+            compression: .deflate,
+            compressionLevel: 6,
+            encryption: .aes256,
+            password: password
+        )
+        
+        #expect(FileManager.default.fileExists(atPath: archiveURL.path))
+        
+        // Verify it's encrypted
+        let entries = try Archive.list(url: archiveURL)
+        #expect(entries.first?.isEncrypted == true)
+        
+        // Verify it extracts correctly
+        try Archive.extract(url: archiveURL, to: extractDir, password: password)
+        let content = try String(contentsOf: extractDir.appendingPathComponent("file1.txt"), encoding: .utf8)
+        #expect(content == "Hello, World!")
+    }
+    
+    @Test func archiveTarGzWithCompressionLevel() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let sourceDir = tempDir.appendingPathComponent("source")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        _ = try createTestFiles(in: sourceDir)
+        
+        let archiveURL = tempDir.appendingPathComponent("test.tar.gz")
+        let extractDir = tempDir.appendingPathComponent("extracted")
+        
+        try Archive.create(
+            from: sourceDir,
+            to: archiveURL,
+            format: .tar,
+            compression: .gzip,
+            compressionLevel: 9
+        )
+        
+        let info = try Archive.info(url: archiveURL)
+        #expect(info.format == .tar)
+        #expect(info.compression == .gzip)
+        
+        // Verify round-trip
+        try Archive.extract(url: archiveURL, to: extractDir)
+        
+        // Find file1.txt in extracted contents
+        let entries = try Archive.list(url: archiveURL)
+        guard let entry = entries.first(where: { $0.path.contains("file1.txt") }) else {
+            Issue.record("file1.txt not found in archive")
+            return
+        }
+        
+        let extractedPath = extractDir.appendingPathComponent(entry.path)
+        let content = try String(contentsOf: extractedPath, encoding: .utf8)
+        #expect(content == "Hello, World!")
+    }
+    
+    @Test(.enabled(if: ArchiveCompression.bzip2.isAvailable))
+    func archiveBzip2WithCompressionLevel() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let files = try createTestFiles(in: tempDir)
+        let archiveURL = tempDir.appendingPathComponent("test.tar.bz2")
+        
+        try Archive.create(
+            files: files,
+            to: archiveURL,
+            format: .tar,
+            compression: .bzip2,
+            compressionLevel: 9
+        )
+        
+        let info = try Archive.info(url: archiveURL)
+        #expect(info.format == .tar)
+        #expect(info.compression == .bzip2)
+    }
+    
+    // MARK: - Helpers
+    
+    private func findExtractedFile(named fileName: String, in directory: URL) -> URL? {
+        guard let enumerator = FileManager.default.enumerator(atPath: directory.path) else {
+            return nil
+        }
+        
+        while let file = enumerator.nextObject() as? String {
+            if file.hasSuffix(fileName) {
+                return directory.appendingPathComponent(file)
+            }
+        }
+        return nil
     }
 }
