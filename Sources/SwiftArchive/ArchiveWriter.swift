@@ -136,19 +136,25 @@ final class WriteContext {
     
     /// Add a file from disk
     func addFile(at fileURL: URL, archivePath: String? = nil) throws {
-        let data = try Data(contentsOf: fileURL)
-        let path = archivePath ?? fileURL.lastPathComponent
+        let resourceValues = try fileURL.resourceValues(forKeys: [.isDirectoryKey])
         
-        let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
-        let permissions = (attributes[.posixPermissions] as? Int) ?? 0o644
-        let modificationDate = (attributes[.modificationDate] as? Date) ?? Date()
-        
-        try addFile(
-            path: path,
-            data: data,
-            permissions: UInt16(permissions),
-            modificationDate: modificationDate
-        )
+        if resourceValues.isDirectory == true {
+            try addDirectory(at: fileURL, basePath: archivePath)
+        } else {
+            let data = try Data(contentsOf: fileURL)
+            let path = archivePath ?? fileURL.lastPathComponent
+            
+            let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+            let permissions = (attributes[.posixPermissions] as? Int) ?? 0o644
+            let modificationDate = (attributes[.modificationDate] as? Date) ?? Date()
+            
+            try addFile(
+                path: path,
+                data: data,
+                permissions: UInt16(permissions),
+                modificationDate: modificationDate
+            )
+        }
     }
     
     /// Add a file from Data

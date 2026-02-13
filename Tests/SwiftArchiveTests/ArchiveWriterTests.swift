@@ -264,6 +264,95 @@ struct ArchiveWriterTests {
         #expect(String(data: data!, encoding: .utf8) == "Hello")
     }
     
+    // MARK: - addFile with Directory Tests
+
+    @Test func addFileWithDirectoryURLAddsContentsRecursively() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        // Create a directory structure to add via addFile(at:)
+        let sourceDir = tempDir.appendingPathComponent("source")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        let file1 = sourceDir.appendingPathComponent("hello.txt")
+        let subdir = sourceDir.appendingPathComponent("nested")
+        try FileManager.default.createDirectory(at: subdir, withIntermediateDirectories: true)
+        let file2 = subdir.appendingPathComponent("deep.txt")
+
+        try "Hello from root".write(to: file1, atomically: true, encoding: .utf8)
+        try "Hello from nested".write(to: file2, atomically: true, encoding: .utf8)
+
+        // Pass the directory URL to addFile(at:) — it should detect it's a directory
+        // and delegate to addDirectory(at:basePath:)
+        let archiveURL = tempDir.appendingPathComponent("test.zip")
+        let writer = ArchiveWriter(url: archiveURL)
+
+        try writer.write { context in
+            try context.addFile(at: sourceDir)
+        }
+
+        // Verify the archive contains the directory entries and files
+        let reader = try ArchiveReader(url: archiveURL)
+        let entries = try reader.listEntries()
+        let paths = entries.map(\.path)
+
+        #expect(paths.contains(where: { $0.contains("hello.txt") }), "Archive should contain hello.txt")
+        #expect(paths.contains(where: { $0.contains("deep.txt") }), "Archive should contain nested/deep.txt")
+    }
+
+    @Test func addFileWithDirectoryURLRespectsArchivePath() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        // Create a simple directory with one file
+        let sourceDir = tempDir.appendingPathComponent("mydir")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        let file = sourceDir.appendingPathComponent("data.txt")
+        try "Some data".write(to: file, atomically: true, encoding: .utf8)
+
+        // Pass a custom archivePath (basePath) when adding the directory
+        let archiveURL = tempDir.appendingPathComponent("test.zip")
+        let writer = ArchiveWriter(url: archiveURL)
+
+        try writer.write { context in
+            try context.addFile(at: sourceDir, archivePath: "custom-root")
+        }
+
+        let reader = try ArchiveReader(url: archiveURL)
+        let entries = try reader.listEntries()
+        let paths = entries.map(\.path)
+
+        // The entries should be under "custom-root/" not "mydir/"
+        #expect(paths.contains(where: { $0.hasPrefix("custom-root/") }), "Archive entries should use the custom archivePath as base, got: \(paths)")
+        #expect(!paths.contains(where: { $0.hasPrefix("mydir/") }), "Archive entries should not use the original directory name, got: \(paths)")
+    }
+
+    @Test func addFileWithRegularFileStillWorks() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        // Ensure that addFile(at:) still works correctly for regular files
+        let fileURL = tempDir.appendingPathComponent("regular.txt")
+        try "Regular file content".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let archiveURL = tempDir.appendingPathComponent("test.zip")
+        let writer = ArchiveWriter(url: archiveURL)
+
+        try writer.write { context in
+            try context.addFile(at: fileURL)
+        }
+
+        let reader = try ArchiveReader(url: archiveURL)
+        let entries = try reader.listEntries()
+        #expect(entries.count == 1)
+        #expect(entries.first?.path == "regular.txt")
+
+        // Verify content round-trips correctly
+        let extracted = try reader.extract(path: "regular.txt")
+        #expect(String(data: extracted!, encoding: .utf8) == "Regular file content")
+    }
+
     // MARK: - Compression Level Tests
     
     @Test func initWithCompressionLevel() throws {
@@ -462,6 +551,51 @@ struct ArchiveWriterTests {
         #expect(extracted == data)
     }
     
+    @Test func compressionLevelProducesDifferentSizes() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        // Use data with enough redundancy that compression level matters,
+        // but not so uniform that every level compresses identically.
+        // Mix repeated patterns with varying content to create realistic compressible data.
+        var content = ""
+        for i in 0..<5000 {
+            content += "The quick brown fox jumps over the lazy dog \(i % 100) "
+        }
+        let data = content.data(using: .utf8)!
+
+        // Create archives at levels 1 and 9
+        let level1URL = tempDir.appendingPathComponent("level1.zip")
+        let level9URL = tempDir.appendingPathComponent("level9.zip")
+
+        let writer1 = ArchiveWriter(
+            url: level1URL,
+            format: .zip,
+            compression: .deflate,
+            compressionLevel: 1
+        )
+        try writer1.write { context in
+            try context.addFile(path: "data.txt", data: data)
+        }
+
+        let writer9 = ArchiveWriter(
+            url: level9URL,
+            format: .zip,
+            compression: .deflate,
+            compressionLevel: 9
+        )
+        try writer9.write { context in
+            try context.addFile(path: "data.txt", data: data)
+        }
+
+        let size1 = try FileManager.default.attributesOfItem(atPath: level1URL.path)[.size] as! Int64
+        let size9 = try FileManager.default.attributesOfItem(atPath: level9URL.path)[.size] as! Int64
+
+        print(size1)
+        print(size9)
+        #expect(size9 < size1, "Level 9 (\(size9) bytes) should be strictly smaller than level 1 (\(size1) bytes). If equal, compression level is not being applied.")
+    }
+
     @Test func compressionLevelNilUsesDefault() throws {
         let tempDir = try createTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempDir) }
