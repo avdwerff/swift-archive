@@ -205,10 +205,14 @@ public enum ArchiveFormat: String, CaseIterable, Sendable {
     
     public var canWrite: Bool {
         switch self {
-        case .zip, .tar, .sevenZip, .cpio, .iso9660, .ar, .xar, .mtree, .warc, .shar:
+        case .zip, .tar, .cpio, .ar, .mtree, .warc, .shar:
             return true
+        case .sevenZip:
+            return true  // 7z has internal LZMA
+        case .xar, .iso9660:
+            return false  // Needs LZMA
         case .rar, .lha, .cab, .unknown:
-            return false
+            return false  // Read-only
         }
     }
 }

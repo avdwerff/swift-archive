@@ -116,8 +116,12 @@ final class ArchiveWriter: Sendable {
     
     private static func defaultCompression(for format: ArchiveFormat) -> ArchiveCompression {
         switch format {
+        case .zip:
+            return .deflate
+        case .tar:
+            return .gzip
         case .sevenZip:
-            return .lzma
+            return .none  // ← 7z has internal LZMA
         default:
             return .none
         }
