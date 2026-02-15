@@ -204,6 +204,40 @@ public struct ArchiveProvider: ArchiveProviding {
             password: password
         )
         
+        // Collect ALL files first (including directory contents)
+        var allFiles: [(url: URL, archivePath: String, size: Int64)] = []
+        var totalSize: Int64 = 0
+        
+        for file in files {
+            let resourceValues = try file.resourceValues(forKeys: [.isDirectoryKey])
+            
+            if resourceValues.isDirectory == true {
+                // Enumerate directory
+                let basePath = file.lastPathComponent
+                if let enumerator = FileManager.default.enumerator(
+                    at: file,
+                    includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey],
+                    options: [.skipsHiddenFiles]
+                ) {
+                    while let itemURL = enumerator.nextObject() as? URL {
+                        let itemValues = try itemURL.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey])
+                        let relativePath = itemURL.path.replacingOccurrences(of: file.path + "/", with: "")
+                        let archivePath = basePath + "/" + relativePath
+                        let size = Int64(itemValues.fileSize ?? 0)
+                        
+                        allFiles.append((itemURL, archivePath, size))
+                        if itemValues.isDirectory != true {
+                            totalSize += size
+                        }
+                    }
+                }
+            } else {
+                let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int64) ?? 0
+                allFiles.append((file, file.lastPathComponent, size))
+                totalSize += size
+            }
+        }
+        
         let writer = ArchiveWriter(
             url: archiveURL,
             format: format,
@@ -213,20 +247,19 @@ public struct ArchiveProvider: ArchiveProviding {
             password: password
         )
         
-        let totalSize = files.reduce(into: Int64(0)) { result, url in
-            result += (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
-        }
-        
         var processedSize: Int64 = 0
         
         try writer.write { context in
-            for file in files {
-                try context.addFile(at: file)
+            for entry in allFiles {
+                let resourceValues = try entry.url.resourceValues(forKeys: [.isDirectoryKey])
                 
-                let fileSize = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int64) ?? 0
-                processedSize += fileSize
-                
-                try progress?(file, Double(processedSize) / Double(max(totalSize, 1)))
+                if resourceValues.isDirectory == true {
+                    try context.addDirectory(path: entry.archivePath)
+                } else {
+                    try context.addFile(at: entry.url, archivePath: entry.archivePath)
+                    processedSize += entry.size
+                    try progress?(entry.url, Double(processedSize) / Double(max(totalSize, 1)))
+                }
             }
         }
         

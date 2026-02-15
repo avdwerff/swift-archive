@@ -229,12 +229,71 @@ struct SwiftArchiveTests {
         let archiveURL = tempDir.appendingPathComponent("test.zip")
         
         var progressValues: [Double] = []
-        try Archive.create(from: sourceDir, to: archiveURL) { _, progress  in
+        try Archive.create(files: [sourceDir], to: archiveURL) { _, progress in
             progressValues.append(progress)
         }
-        
-        #expect(!progressValues.isEmpty)
+
+        #expect(progressValues.count >= 3)
         #expect(progressValues.last == 1.0)
+        
+        for i in 1..<progressValues.count {
+            #expect(progressValues[i] >= progressValues[i-1])
+        }
+    }
+    
+    @Test func archiveCreateDirectoryProgressPerFile() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let sourceDir = tempDir.appendingPathComponent("source")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        
+        for i in 0..<10 {
+            let file = sourceDir.appendingPathComponent("file\(i).txt")
+            try "Content \(i)".write(to: file, atomically: true, encoding: .utf8)
+        }
+        
+        let archiveURL = tempDir.appendingPathComponent("test.zip")
+        
+        var progressCalls = 0
+        var lastProgress: Double = 0
+        
+        try Archive.create(files: [sourceDir], to: archiveURL) { url, progress in
+            progressCalls += 1
+            #expect(progress >= lastProgress)
+            lastProgress = progress
+        }
+        
+        #expect(progressCalls >= 10)
+        #expect(lastProgress == 1.0)
+    }
+    
+    @Test func roundTripFilesIncludingDirectory() throws {
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let sourceDir = tempDir.appendingPathComponent("source")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        let files = try createTestFiles(in: sourceDir)
+        
+        let archiveURL = tempDir.appendingPathComponent("test.zip")
+        let extractDir = tempDir.appendingPathComponent("extracted")
+        
+        try Archive.create(files: [sourceDir], to: archiveURL)
+        
+        let entries = try Archive.list(url: archiveURL)
+        print(">>> Entries: \(entries.map { $0.path })")
+        
+        try Archive.extract(url: archiveURL, to: extractDir)
+        
+        guard let file1Entry = entries.first(where: { $0.path.contains("file1.txt") }) else {
+            Issue.record("file1.txt not found")
+            return
+        }
+        
+        let extractedPath = extractDir.appendingPathComponent(file1Entry.path)
+        let content = try String(contentsOf: extractedPath, encoding: .utf8)
+        #expect(content == "Hello, World!")
     }
     
     // MARK: - Archive.detectFormat Tests
