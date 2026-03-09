@@ -535,10 +535,7 @@ private final class WriteHandle {
                 option = "zip:encryption=aes256"
             }
         case .sevenZip:
-            // 7z only supports AES-256
-            option = "7zip:compression=lzma2"  // encryption is automatic when passphrase is set
-            // Note: 7z encryption is enabled automatically when passphrase is set
-            return
+            throw ArchiveError.encryptionNotSupported(format)
         default:
             throw ArchiveError.encryptionNotSupported(format)
         }

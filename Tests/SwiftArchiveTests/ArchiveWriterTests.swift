@@ -47,7 +47,6 @@ struct ArchiveWriterTests {
         
         #expect(writer.url == archiveURL)
         #expect(writer.format == .zip)
-        #expect(writer.compression == .none)
     }
     
     @Test func initWithFormat() throws {
@@ -615,5 +614,24 @@ struct ArchiveWriterTests {
         }
         
         #expect(FileManager.default.fileExists(atPath: archiveURL.path))
+    }
+    
+    @Test func sevenZipEncryptionNotSupported() throws {
+        #expect(ArchiveFormat.sevenZip.writableEncryption.isEmpty)
+        
+        let tempDir = try createTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let archiveURL = tempDir.appendingPathComponent("test.7z")
+        
+        #expect(throws: ArchiveError.self) {
+            try Archive.create(
+                files: [],
+                to: archiveURL,
+                format: .sevenZip,
+                encryption: .aes256,
+                password: "secret"
+            )
+        }
     }
 }

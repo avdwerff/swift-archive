@@ -71,7 +71,7 @@ public enum ArchiveFormat: String, CaseIterable, Sendable {
         case .zip:
             return [.zipTraditional, .aes128, .aes192, .aes256]
         case .sevenZip:
-            return [.aes256]
+            return []
         default:
             return []
         }
