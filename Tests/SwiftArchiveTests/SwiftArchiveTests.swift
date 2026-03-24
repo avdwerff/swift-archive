@@ -274,7 +274,7 @@ struct SwiftArchiveTests {
         
         let sourceDir = tempDir.appendingPathComponent("source")
         try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
-        let files = try createTestFiles(in: sourceDir)
+        _ = try createTestFiles(in: sourceDir)
         
         let archiveURL = tempDir.appendingPathComponent("test.zip")
         let extractDir = tempDir.appendingPathComponent("extracted")

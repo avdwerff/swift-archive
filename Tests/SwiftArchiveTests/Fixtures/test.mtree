@@ -1,0 +1,5 @@
+#mtree
+. type=dir
+    hello.txt type=file size=11
+    readme.txt type=file size=13
+..

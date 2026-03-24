@@ -34,12 +34,12 @@ public enum ArchiveFormat: String, CaseIterable, Sendable {
         case 0x10000: self = .cpio
         case 0x40000: self = .iso9660
         case 0x70000: self = .ar
-        case 0x60000: self = .cab
-        case 0xC0000: self = .xar
+        case 0xC0000: self = .cab
+        case 0xA0000: self = .xar
         case 0x80000: self = .mtree
         case 0xB0000: self = .lha
         case 0xF0000: self = .warc
-        case 0xA0000: self = .shar
+        case 0x20000: self = .shar 
         default: self = .unknown
         }
     }

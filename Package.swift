@@ -30,6 +30,7 @@ let package = Package(
             linkerSettings: [
                 .linkedLibrary("z"),
                 .linkedLibrary("bz2", .when(platforms: [.macOS])),
+                .linkedLibrary("xml2"),
             ]
         ),
         .target(
