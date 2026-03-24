@@ -84,8 +84,8 @@ try Archive.extract(url: archiveURL, to: destination) { progress in
 |--------|------|-------|------------|
 | ZIP | ✅ | ✅ | AES-256, AES-128, ZipCrypto |
 | TAR | ✅ | ✅ | — |
-| 7z | ✅ | ✅ | Read only |
-| RAR | ✅ | — | Read only |
+| 7z | ✅ | ✅ | Decrypt only |
+| RAR | ✅ | — | Decrypt only |
 | CPIO | ✅ | ✅ | — |
 | ISO9660 | ✅ | — | — |
 | CAB | ✅ | — | — |
